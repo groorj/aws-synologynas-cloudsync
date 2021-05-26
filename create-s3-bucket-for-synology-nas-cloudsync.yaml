@@ -1,0 +1,93 @@
+# create IAM user and return access / secret key -> done
+# create Policy to allow IAM user to access S3 bucket (full access) -> done
+# create S3 bucket -> done
+
+# https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html
+# Policy Name -> 128 characters
+# User name -> 64 characters
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
+# Bucket name -> Between 3 and 63 characters
+
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+    AWS CloudFormation Template to help you create your S3 bucket to be used by the Synology NAS CloudSync app.
+    Here is what it will be created:
+      - S3 Bucket
+      - IAM User (Access Key and Access Secret)
+      - IAM Policy to restrict User access created bucket
+    Some important info:
+      - S3 Bucket Name lenght cannot exceed 45 characters
+      - The Output information will contain: 1) Bucket Name, 2) UserName created, 3) AccessKey and 4) AccessSecret
+      - Versioning is enabled by default
+      - Current object versions will be transitioned to STANDARD_IA in 30 days -> GLACIER in 60 days -> DEEP_ARCHIVE in 150 days
+      - Old object versions will be transitioned to GLACIER in 15 days -> DEEP_ARCHIVE in 105 days
+      - Objects does not expire by default but you can remove the comment for ExpirationInDays if you want them to expire
+Parameters:
+  BucketName:
+    Type: String
+    Description: 'The name of the S3 Bucket to create. Bucket name CANNOT exceed 45 characters.'
+Resources:
+  S3BUCKET:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+          - Id: GlacierRule
+            Prefix: "/"
+            Status: Enabled
+            # ExpirationInDays: 365
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 60
+                StorageClass: GLACIER
+              - TransitionInDays: 150
+                StorageClass: DEEP_ARCHIVE
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 15
+                StorageClass: GLACIER
+              - TransitionInDays: 105
+                StorageClass: DEEP_ARCHIVE
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+    DeletionPolicy: Retain
+
+  S3User:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "cloudsync-${S3BUCKET}"
+      Policies:
+        - PolicyName: !Sub  "cloudsync-access-${S3BUCKET}"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - s3:*
+              Resource:
+                - !Sub arn:aws:s3:::${S3BUCKET}
+                - !Sub arn:aws:s3:::${S3BUCKET}/* 
+
+  S3UserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref S3User
+
+Outputs:
+  BucketName:
+    Description: S3 Bucket Name
+    Value: !Ref S3BUCKET
+  UserName:
+    Value: !Ref S3User  
+  UserAccessKeyID:
+    Value: !Ref S3UserAccessKey
+  UserSecretAccessKey:
+    Value: !GetAtt S3UserAccessKey.SecretAccessKey
